@@ -601,6 +601,54 @@ app.get('/club-invites/:code', async (request, reply) => {
   };
 });
 
+// Join a club directly by club ID
+app.post('/clubs/:clubId/join', async (request, reply) => {
+  const { clubId } = request.params as any;
+  const { userId, isCoach } = request.body as any;
+
+  if (!userId) {
+    return reply.code(400).send({ error: 'userId is required' });
+  }
+
+  // Validate club exists
+  const club = await Club.findById(clubId).exec();
+  if (!club) {
+    return reply.code(404).send({ error: 'Club not found' });
+  }
+
+  // Check club status - reject if pending or rejected
+  if (club.status === 'pending') {
+    return reply.code(400).send({ error: 'Club is pending validation' });
+  }
+
+  if (club.status === 'rejected') {
+    return reply.code(400).send({ error: 'Club has been rejected' });
+  }
+
+  // Update user to join the club
+  const user = await User.findById(userId).exec();
+  if (!user) {
+    return reply.code(404).send({ error: 'User not found' });
+  }
+
+  const updates: any = {
+    club_id: clubId,
+    club_status: club.status,
+    onboarding_completed: true,
+    updatedAt: Date.now()
+  };
+
+  // Set coach mode if provided
+  if (isCoach !== undefined) {
+    updates.is_coach = isCoach === true || isCoach === 'true';
+  }
+
+  await User.findByIdAndUpdate(userId, updates, { new: true }).exec();
+
+  return { ok: true, clubId, clubName: club.name };
+});
+
+// Legacy endpoint - kept for backwards compatibility but deprecated
 app.post('/club-invites/:code/use', async (request, reply) => {
   const { code } = request.params as any;
   const { userId } = request.body as any;
