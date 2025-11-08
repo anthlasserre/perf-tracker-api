@@ -225,15 +225,16 @@ app.get('/gamestats', async (request) => {
 });
 
 app.get('/gamestats/:id', async (request, reply) => {
-  const { _id } = request.params as any;
-  const doc = await GameStat.findById(_id).exec();
+  const { id } = request.params as any;
+  console.log('Getting stat by ID:', id);
+  const doc = await GameStat.findById(id).exec();
   if (!doc) return reply.code(404).send({ error: 'Not found' });
   return doc.toObject();
 });
 
 app.delete('/gamestats/:id', async (request) => {
-  const { _id } = request.params as any;
-  await GameStat.findByIdAndDelete(_id).exec();
+  const { id } = request.params as any;
+  await GameStat.findByIdAndDelete(id).exec();
   return { ok: true };
 });
 
@@ -502,28 +503,72 @@ app.post('/clubs', async (request, reply) => {
 
 app.get('/clubs', async (request) => {
   const status = (request.query as any).status as string;
+  const limit = Number((request.query as any).limit ?? 0);
 
   const filter: any = {};
   if (status) {
     filter.status = status;
   }
 
-  const docs = await Club.find(filter).sort({ createdAt: -1 }).exec();
+  let query = Club.find(filter).sort({ createdAt: -1 });
+  if (limit > 0) {
+    query = query.limit(limit);
+  }
+
+  const docs = await query.exec();
   return docs.map((doc: any) => doc.toObject());
 });
 
+// Search clubs endpoint
+app.get('/clubs/search', async (request) => {
+  const search = (request.query as any).q as string;
+  const limit = Number((request.query as any).limit ?? 20);
+
+  if (!search || search.trim().length === 0) {
+    return [];
+  }
+
+  const filter: any = {
+    name: { $regex: search.trim(), $options: 'i' }
+  };
+
+  const docs = await Club.find(filter)
+    .sort({ createdAt: -1 })
+    .limit(limit)
+    .exec();
+
+  return docs.map((doc: any) => doc.toObject());
+});
+
+// Get club statistics
+app.get('/clubs/stats', async () => {
+  const [pending, validated, rejected, total] = await Promise.all([
+    Club.countDocuments({ status: 'pending' }).exec(),
+    Club.countDocuments({ status: 'validated' }).exec(),
+    Club.countDocuments({ status: 'rejected' }).exec(),
+    Club.countDocuments({}).exec(),
+  ]);
+
+  return {
+    pending,
+    validated,
+    rejected,
+    total,
+  };
+});
+
 app.get('/clubs/:id', async (request, reply) => {
-  const { _id } = request.params as any;
-  const doc = await Club.findById(_id).exec();
+  const { id } = request.params as any;
+  const doc = await Club.findById(id).exec();
   if (doc === null) return reply.code(404).send({ error: 'Club not found' });
   return doc.toObject();
 });
 
 app.patch('/clubs/:id', async (request, reply) => {
-  const { _id } = request.params as any;
+  const { id } = request.params as any;
   const body = request.body as any;
 
-  const doc = await Club.findById(_id).exec();
+  const doc = await Club.findById(id).exec();
   if (!doc) return reply.code(404).send({ error: 'Club not found' });
 
   const allowedFields = ['status', 'validatedBy', 'name', 'embleme'];
@@ -535,7 +580,7 @@ app.patch('/clubs/:id', async (request, reply) => {
     }
   }
 
-  await Club.findByIdAndUpdate(_id, updates, { new: true }).exec();
+  await Club.findByIdAndUpdate(id, updates, { new: true }).exec();
 
   return { ok: true };
 });
@@ -719,17 +764,17 @@ app.get('/records', async (request) => {
 });
 
 app.get('/records/:id', async (request, reply) => {
-  const { _id } = request.params as any;
-  const doc = await Record.findById(_id).exec();
+  const { id } = request.params as any;
+  const doc = await Record.findById(id).exec();
   if (doc === null) return reply.code(404).send({ error: 'Record not found' });
   return doc.toObject();
 });
 
 app.patch('/records/:id', async (request, reply) => {
-  const { _id } = request.params as any;
+  const { id } = request.params as any;
   const body = request.body as any;
 
-  const doc = await Record.findById(_id).exec();
+  const doc = await Record.findById(id).exec();
   if (!doc) return reply.code(404).send({ error: 'Record not found' });
 
   const allowedFields = ['title', 'videoUrl', 'description'];
@@ -741,14 +786,14 @@ app.patch('/records/:id', async (request, reply) => {
     }
   }
 
-  await Record.findByIdAndUpdate(_id, updates, { new: true }).exec();
+  await Record.findByIdAndUpdate(id, updates, { new: true }).exec();
 
   return { ok: true };
 });
 
 app.delete('/records/:id', async (request) => {
-  const { _id } = request.params as any;
-  await Record.findByIdAndDelete(_id).exec();
+  const { id } = request.params as any;
+  await Record.findByIdAndDelete(id).exec();
   return { ok: true };
 });
 
@@ -808,6 +853,59 @@ app.patch('/users/:id', async (request, reply) => {
   await User.findByIdAndUpdate(id, updates, { new: true }).exec();
 
   return { ok: true };
+});
+
+// Get all users (for admin)
+app.get('/users', async (request) => {
+  const limit = Number((request.query as any).limit ?? 20);
+
+  let query = User.find({}).sort({ createdAt: -1 });
+  if (limit > 0) {
+    query = query.limit(limit);
+  }
+
+  const docs = await query.exec();
+  return docs.map((doc) => doc.toObject());
+});
+
+// Search users endpoint
+app.get('/users/search', async (request) => {
+  const search = (request.query as any).q as string;
+  const limit = Number((request.query as any).limit ?? 20);
+
+  if (!search || search.trim().length === 0) {
+    return [];
+  }
+
+  const searchRegex = { $regex: search.trim(), $options: 'i' };
+  const filter: any = {
+    $or: [
+      { name: searchRegex },
+      { email: searchRegex }
+    ]
+  };
+
+  const docs = await User.find(filter)
+    .sort({ createdAt: -1 })
+    .limit(limit)
+    .exec();
+
+  return docs.map((doc: any) => doc.toObject());
+});
+
+// Get user statistics
+app.get('/users/stats', async () => {
+  const [total, coaches, players] = await Promise.all([
+    User.countDocuments({}).exec(),
+    User.countDocuments({ is_coach: true }).exec(),
+    User.countDocuments({ is_coach: false }).exec(),
+  ]);
+
+  return {
+    total,
+    coaches,
+    players,
+  };
 });
 
 // Get users by club
