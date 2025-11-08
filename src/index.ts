@@ -474,6 +474,114 @@ app.get('/players/:userId/stats', async (request, reply) => {
   };
 });
 
+// Get player progress over time
+app.get('/players/:userId/progress', async (request, reply) => {
+  const { userId } = request.params as any;
+
+  const docs = await GameStat.find({ userId }).sort({ createdAt: 1 }).exec();
+
+  if (docs.length === 0) {
+    return reply.code(404).send({ error: 'Player stats not found' });
+  }
+
+  // Cumulative counters
+  let cumulativePassPositive = 0;
+  let cumulativePassNegative = 0;
+  let cumulativeTackleOffensive = 0;
+  let cumulativeTackleMissed = 0;
+  let cumulativeTackleSuffered = 0;
+  let cumulativeDuelWon = 0;
+  let cumulativeDuelNeutral = 0;
+  let cumulativeDuelLost = 0;
+  let cumulativeFaults = 0;
+  let cumulativeMinutes = 0;
+  let cumulativePerformanceRating = 0;
+  let matchCount = 0;
+
+  const progressData: Array<{
+    date: number;
+    passesAccuracy: number | null;
+    tackleAccuracy: number | null;
+    duelAccuracy: number | null;
+    faults: number;
+    minutesPlayed: number;
+    performanceRating: number;
+  }> = [];
+
+  for (const stat of docs) {
+    const statObj = stat.toObject();
+    matchCount += 1;
+    cumulativeMinutes += statObj.playTime || 0;
+    cumulativePerformanceRating += statObj.performanceRating || 0;
+
+    // Count actions for this game
+    const actions = statObj.actions || [];
+    for (const action of actions) {
+      switch (action.type) {
+        case 'pass_positive':
+          cumulativePassPositive += 1;
+          break;
+        case 'pass_negative':
+          cumulativePassNegative += 1;
+          break;
+        case 'tackle_offensive':
+          cumulativeTackleOffensive += 1;
+          break;
+        case 'tackle_missed':
+          cumulativeTackleMissed += 1;
+          break;
+        case 'tackle_suffered':
+          cumulativeTackleSuffered += 1;
+          break;
+        case 'duel_won':
+          cumulativeDuelWon += 1;
+          break;
+        case 'duel_neutral':
+          cumulativeDuelNeutral += 1;
+          break;
+        case 'duel_lost':
+          cumulativeDuelLost += 1;
+          break;
+        case 'fault':
+          cumulativeFaults += 1;
+          break;
+      }
+    }
+
+    // Calculate percentages
+    const totalPasses = cumulativePassPositive + cumulativePassNegative;
+    const passesAccuracy = totalPasses > 0 
+      ? (cumulativePassPositive / totalPasses) * 100 
+      : null;
+
+    const totalTackles = cumulativeTackleOffensive + cumulativeTackleMissed + cumulativeTackleSuffered;
+    const tackleAccuracy = totalTackles > 0
+      ? ((cumulativeTackleOffensive + cumulativeTackleSuffered) / totalTackles) * 100
+      : null;
+
+    const totalDuels = cumulativeDuelWon + cumulativeDuelNeutral + cumulativeDuelLost;
+    const duelAccuracy = totalDuels > 0
+      ? ((cumulativeDuelWon + cumulativeDuelNeutral) / totalDuels) * 100
+      : null;
+
+    const avgPerformanceRating = matchCount > 0 
+      ? cumulativePerformanceRating / matchCount 
+      : 0;
+
+    progressData.push({
+      date: statObj.createdAt,
+      passesAccuracy: passesAccuracy !== null ? Math.round(passesAccuracy * 100) / 100 : null,
+      tackleAccuracy: tackleAccuracy !== null ? Math.round(tackleAccuracy * 100) / 100 : null,
+      duelAccuracy: duelAccuracy !== null ? Math.round(duelAccuracy * 100) / 100 : null,
+      faults: cumulativeFaults,
+      minutesPlayed: cumulativeMinutes,
+      performanceRating: Math.round(avgPerformanceRating * 10) / 10,
+    });
+  }
+
+  return progressData;
+});
+
 // Club endpoints
 app.post('/clubs', async (request, reply) => {
   const parse = clubValidationSchema.safeParse(request.body);
