@@ -300,6 +300,7 @@ app.get('/clubs/:clubId/players', async (request, reply) => {
       duelNeutral: number;
       duelLost: number;
       tackleOffensive: number;
+      tackleNeutral: number;
       tackleMissed: number;
       tackleSuffered: number;
       faults: number;
@@ -334,6 +335,7 @@ app.get('/clubs/:clubId/players', async (request, reply) => {
           duelNeutral: 0,
           duelLost: 0,
           tackleOffensive: 0,
+          tackleNeutral: 0,
           tackleMissed: 0,
           tackleSuffered: 0,
           faults: 0,
@@ -381,6 +383,9 @@ app.get('/clubs/:clubId/players', async (request, reply) => {
         case 'tackle_offensive':
           player.stats.tackleOffensive += 1;
           break;
+        case 'tackle_neutral':
+          player.stats.tackleNeutral += 1;
+          break;
         case 'tackle_missed':
           player.stats.tackleMissed += 1;
           break;
@@ -427,6 +432,7 @@ app.get('/players/:userId/stats', async (request, reply) => {
     duelNeutral: 0,
     duelLost: 0,
     tackleOffensive: 0,
+    tackleNeutral: 0,
     tackleMissed: 0,
     tackleSuffered: 0,
     faults: 0,
@@ -472,6 +478,9 @@ app.get('/players/:userId/stats', async (request, reply) => {
         case 'tackle_offensive':
           stats.tackleOffensive += 1;
           break;
+        case 'tackle_neutral':
+          stats.tackleNeutral += 1;
+          break;
         case 'tackle_missed':
           stats.tackleMissed += 1;
           break;
@@ -508,6 +517,7 @@ app.get('/players/:userId/progress', async (request, reply) => {
   let cumulativePassPositive = 0;
   let cumulativePassNegative = 0;
   let cumulativeTackleOffensive = 0;
+  let cumulativeTackleNeutral = 0;
   let cumulativeTackleMissed = 0;
   let cumulativeTackleSuffered = 0;
   let cumulativeDuelWon = 0;
@@ -547,6 +557,9 @@ app.get('/players/:userId/progress', async (request, reply) => {
         case 'tackle_offensive':
           cumulativeTackleOffensive += 1;
           break;
+        case 'tackle_neutral':
+          cumulativeTackleNeutral += 1;
+          break;
         case 'tackle_missed':
           cumulativeTackleMissed += 1;
           break;
@@ -574,9 +587,9 @@ app.get('/players/:userId/progress', async (request, reply) => {
       ? (cumulativePassPositive / totalPasses) * 100
       : null;
 
-    const totalTackles = cumulativeTackleOffensive + cumulativeTackleMissed + cumulativeTackleSuffered;
+    const totalTackles = cumulativeTackleOffensive + cumulativeTackleNeutral + cumulativeTackleMissed + cumulativeTackleSuffered;
     const tackleAccuracy = totalTackles > 0
-      ? ((cumulativeTackleOffensive + cumulativeTackleSuffered) / totalTackles) * 100
+      ? ((cumulativeTackleOffensive + cumulativeTackleNeutral + cumulativeTackleSuffered) / totalTackles) * 100
       : null;
 
     const totalDuels = cumulativeDuelWon + cumulativeDuelNeutral + cumulativeDuelLost;
