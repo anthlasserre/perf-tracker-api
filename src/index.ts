@@ -4,7 +4,7 @@ import cors from '@fastify/cors';
 import multipart from '@fastify/multipart';
 import mongoose from 'mongoose';
 import { z } from 'zod';
-import { uploadVideoToR2, testR2Connection } from './r2';
+import { uploadVideoToR2, testR2Connection, getSignedVideoUrl } from './r2';
 
 const PORT = Number(process.env.PORT || 3001);
 const DATABASE_URL = process.env.DATABASE_URL;
@@ -28,6 +28,7 @@ const gameStatSchema = new mongoose.Schema({
   physicalForm: { type: mongoose.Schema.Types.Mixed, required: true },
   mentalForm: { type: mongoose.Schema.Types.Mixed, required: true },
   videoUrl: String,
+  videoAssetKey: String, // R2 asset key (e.g., "videos/uuid.mp4")
   videoSource: String,
   actions: { type: mongoose.Schema.Types.Mixed, required: true },
   positiveNotes: { type: mongoose.Schema.Types.Mixed, required: true },
@@ -62,6 +63,7 @@ const recordSchema = new mongoose.Schema({
   clubId: { type: String, required: true, index: true },
   title: { type: String, required: true },
   videoUrl: { type: String, required: true },
+  videoAssetKey: { type: String, required: true },
   description: String,
   createdBy: { type: String, required: true, index: true },
   createdAt: { type: Number, required: true },
@@ -120,6 +122,7 @@ const gameStatValidationSchema = z.object({
   physicalForm: z.any(),
   mentalForm: z.any(),
   videoUrl: z.string().optional().nullable(),
+  videoAssetKey: z.string().optional().nullable(),
   videoSource: z.string().optional().nullable(),
   actions: z.any(),
   positiveNotes: z.any(),
@@ -154,6 +157,7 @@ const recordValidationSchema = z.object({
   clubId: z.string(),
   title: z.string(),
   videoUrl: z.string(),
+  videoAssetKey: z.string().optional().nullable(),
   description: z.string().optional().nullable(),
   createdBy: z.string(),
   createdAt: z.number().int(),
@@ -211,6 +215,7 @@ app.post('/gamestats', async (request, reply) => {
       physicalForm: stat.physicalForm,
       mentalForm: stat.mentalForm,
       videoUrl: stat.videoUrl ?? null,
+      videoAssetKey: stat.videoAssetKey ?? null,
       videoSource: stat.videoSource ?? null,
       actions: stat.actions,
       positiveNotes: stat.positiveNotes,
@@ -857,6 +862,8 @@ app.post('/records', async (request, reply) => {
   const record = parse.data;
   const recordId = record._id || generateId('record');
 
+  console.log("record", record);
+
   await Record.findOneAndUpdate(
     { _id: recordId },
     {
@@ -864,6 +871,7 @@ app.post('/records', async (request, reply) => {
       clubId: record.clubId,
       title: record.title,
       videoUrl: record.videoUrl,
+      videoAssetKey: record.videoAssetKey,
       description: record.description ?? null,
       createdBy: record.createdBy,
       createdAt: record.createdAt,
@@ -1039,6 +1047,52 @@ app.get('/users/club/:clubId', async (request) => {
   return docs.map((doc: any) => doc.toObject());
 });
 
+// Get signed URL for a video
+app.get('/videos/signed-url', async (request, reply) => {
+  try {
+    const { videoUrl, assetKey, expiresIn } = request.query as any;
+
+    // Either videoUrl or assetKey must be provided
+    if (!videoUrl && !assetKey) {
+      return reply.code(400).send({
+        error: 'Either videoUrl or assetKey query parameter is required'
+      });
+    }
+
+    // Use assetKey if provided, otherwise use videoUrl
+    const videoUrlOrKey = assetKey || videoUrl;
+
+    // Parse expiresIn if provided (default to 1 hour)
+    const expirationSeconds = expiresIn ? parseInt(expiresIn, 10) : 3600;
+
+    if (isNaN(expirationSeconds) || expirationSeconds <= 0) {
+      return reply.code(400).send({
+        error: 'expiresIn must be a positive number (seconds)'
+      });
+    }
+
+    // Maximum expiration of 7 days (604800 seconds)
+    const maxExpiration = 604800;
+    const finalExpiration = Math.min(expirationSeconds, maxExpiration);
+
+    const signedUrl = await getSignedVideoUrl(videoUrlOrKey, finalExpiration);
+
+    return reply.code(200).send({
+      ok: true,
+      signedUrl,
+      expiresIn: finalExpiration,
+      assetKey: assetKey || undefined,
+      originalUrl: videoUrl || undefined,
+    });
+  } catch (error) {
+    console.error('Error generating signed URL:', error);
+    return reply.code(500).send({
+      error: 'Failed to generate signed URL',
+      message: error instanceof Error ? error.message : 'Unknown error',
+    });
+  }
+});
+
 // Video upload endpoint
 app.post('/upload/video', async (request, reply) => {
   try {
@@ -1080,7 +1134,7 @@ app.post('/upload/video', async (request, reply) => {
 
     // Stream directly to R2 (memory-efficient - doesn't load entire file into memory)
     // The multipart parser gives us a readable stream which we pass directly to R2
-    const publicUrl = await uploadVideoToR2(
+    const uploadResult = await uploadVideoToR2(
       data.file, // Pass the stream directly
       data.filename || 'video.mp4',
       data.mimetype,
@@ -1089,7 +1143,8 @@ app.post('/upload/video', async (request, reply) => {
 
     return reply.code(200).send({
       ok: true,
-      url: publicUrl,
+      url: uploadResult.url,
+      assetKey: uploadResult.key,
       filename: data.filename,
       size: fileSize > 0 ? fileSize : undefined,
       mimetype: data.mimetype,

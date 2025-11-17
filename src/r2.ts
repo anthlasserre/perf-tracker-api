@@ -1,4 +1,5 @@
-import { S3Client, HeadBucketCommand } from '@aws-sdk/client-s3';
+import { S3Client, HeadBucketCommand, GetObjectCommand } from '@aws-sdk/client-s3';
+import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { Upload } from '@aws-sdk/lib-storage';
 import { v4 as uuidv4 } from 'uuid';
 import { Readable } from 'stream';
@@ -47,14 +48,14 @@ const s3Client = R2_ACCOUNT_ID && R2_ACCESS_KEY_ID && R2_SECRET_ACCESS_KEY
  * @param originalFileName - Original filename for extension detection
  * @param contentType - MIME type of the file (e.g., 'video/mp4')
  * @param fileSize - Optional file size in bytes (for logging)
- * @returns The public URL of the uploaded file
+ * @returns An object containing the public URL and asset key of the uploaded file
  */
 export async function uploadVideoToR2(
   fileStream: Readable,
   originalFileName: string,
   contentType: string,
   fileSize?: number
-): Promise<string> {
+): Promise<{ url: string; key: string }> {
   if (!s3Client) {
     throw new Error('R2 storage is not configured. Please set R2 environment variables.');
   }
@@ -91,9 +92,9 @@ export async function uploadVideoToR2(
     await upload.done();
     console.log(`✅ Video uploaded successfully: ${uniqueFileName}`);
 
-    // Return the public URL
+    // Return both the public URL and the asset key
     const publicUrl = `${R2_PUBLIC_URL}/${uniqueFileName}`;
-    return publicUrl;
+    return { url: publicUrl, key: uniqueFileName };
   } catch (error: any) {
     console.error('❌ Error uploading video to R2:', error);
 
@@ -150,6 +151,63 @@ export async function testR2Connection(): Promise<{ success: boolean; message: s
       success: false,
       message: `Connection test failed: ${error.message || error.Code || 'Unknown error'}`,
     };
+  }
+}
+
+/**
+ * Generate a signed URL for a video stored in R2
+ * @param videoUrlOrKey - The public URL of the video or the asset key (e.g., https://pub-xxxxx.r2.dev/videos/xxx.mp4 or videos/xxx.mp4)
+ * @param expiresIn - Expiration time in seconds (default: 1 hour)
+ * @returns A signed URL that provides temporary access to the video
+ */
+export async function getSignedVideoUrl(
+  videoUrlOrKey: string,
+  expiresIn: number = 60 * 60 * 24 // 1 day by default
+): Promise<string> {
+  if (!s3Client) {
+    throw new Error('R2 storage is not configured. Please set R2 environment variables.');
+  }
+
+  if (!R2_BUCKET_NAME || !R2_PUBLIC_URL) {
+    throw new Error('R2 bucket name or public URL is not configured.');
+  }
+
+  // Extract the key from the video URL or use it directly if it's already a key
+  let key: string;
+
+  // If it starts with "videos/", it's already a key
+  if (videoUrlOrKey.startsWith('videos/')) {
+    key = videoUrlOrKey;
+  } else if (videoUrlOrKey.startsWith(R2_PUBLIC_URL)) {
+    // Extract the key from the public URL
+    key = videoUrlOrKey.replace(R2_PUBLIC_URL + '/', '');
+  } else if (videoUrlOrKey.includes('/videos/')) {
+    // Extract the key from a full URL (fallback)
+    const urlParts = videoUrlOrKey.split('/videos/');
+    if (urlParts.length > 1) {
+      key = `videos/${urlParts[1]}`;
+    } else {
+      throw new Error('Invalid video URL format. Could not extract key.');
+    }
+  } else {
+    // Assume it's already a key
+    key = videoUrlOrKey;
+  }
+
+  try {
+    // Create a GetObject command
+    const command = new GetObjectCommand({
+      Bucket: R2_BUCKET_NAME,
+      Key: key,
+    });
+
+    // Generate a signed URL that expires in the specified time
+    const signedUrl = await getSignedUrl(s3Client, command, { expiresIn });
+
+    return signedUrl;
+  } catch (error: any) {
+    console.error('❌ Error generating signed URL:', error);
+    throw new Error(`Failed to generate signed URL: ${error.message || 'Unknown error'}`);
   }
 }
 
