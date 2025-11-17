@@ -1,4 +1,5 @@
-import { S3Client, PutObjectCommand, HeadBucketCommand } from '@aws-sdk/client-s3';
+import { S3Client, HeadBucketCommand } from '@aws-sdk/client-s3';
+import { Upload } from '@aws-sdk/lib-storage';
 import { v4 as uuidv4 } from 'uuid';
 import { Readable } from 'stream';
 
@@ -41,16 +42,18 @@ const s3Client = R2_ACCOUNT_ID && R2_ACCESS_KEY_ID && R2_SECRET_ACCESS_KEY
   : null;
 
 /**
- * Upload a video file to Cloudflare R2
- * @param fileBuffer - The file buffer to upload
+ * Upload a video file to Cloudflare R2 using streaming (memory-efficient)
+ * @param fileStream - The file stream to upload (Readable stream)
  * @param originalFileName - Original filename for extension detection
  * @param contentType - MIME type of the file (e.g., 'video/mp4')
+ * @param fileSize - Optional file size in bytes (for logging)
  * @returns The public URL of the uploaded file
  */
 export async function uploadVideoToR2(
-  fileBuffer: Buffer,
+  fileStream: Readable,
   originalFileName: string,
-  contentType: string
+  contentType: string,
+  fileSize?: number
 ): Promise<string> {
   if (!s3Client) {
     throw new Error('R2 storage is not configured. Please set R2 environment variables.');
@@ -65,19 +68,27 @@ export async function uploadVideoToR2(
   const uniqueFileName = `videos/${uuidv4()}.${fileExtension}`;
 
   try {
-    // Upload to R2
-    const command = new PutObjectCommand({
-      Bucket: R2_BUCKET_NAME,
-      ACL: 'private',
-      Key: uniqueFileName,
-      Body: fileBuffer,
-      ContentType: contentType,
-      // Note: For public access, you need to configure the bucket's public access settings
-      // in Cloudflare dashboard, not via ACL headers
+    // Upload to R2 using Upload class (handles streaming and large files efficiently)
+    // The Upload class automatically handles multipart uploads for large files
+    const upload = new Upload({
+      client: s3Client,
+      params: {
+        Bucket: R2_BUCKET_NAME,
+        Key: uniqueFileName,
+        Body: fileStream,
+        ContentType: contentType,
+        // Note: ACL is not supported in R2, public access is configured via bucket settings
+      },
+      // Configure multipart upload thresholds
+      partSize: 10 * 1024 * 1024, // 10MB per part (good for large files)
+      leavePartsOnError: false, // Clean up on error
     });
 
-    console.log(`Uploading video to R2: ${uniqueFileName} (${(fileBuffer.length / 1024 / 1024).toFixed(2)} MB)`);
-    await s3Client.send(command);
+    const sizeInfo = fileSize ? ` (${(fileSize / 1024 / 1024).toFixed(2)} MB)` : '';
+    console.log(`Uploading video to R2: ${uniqueFileName}${sizeInfo}`);
+
+    // The Upload class handles streaming and automatically uses multipart uploads for large files
+    await upload.done();
     console.log(`✅ Video uploaded successfully: ${uniqueFileName}`);
 
     // Return the public URL
@@ -143,7 +154,8 @@ export async function testR2Connection(): Promise<{ success: boolean; message: s
 }
 
 /**
- * Convert a stream to a buffer
+ * Convert a stream to a buffer (use sparingly - loads entire file into memory)
+ * Only use this for small files or when buffer is absolutely required
  */
 export async function streamToBuffer(stream: Readable): Promise<Buffer> {
   const chunks: Buffer[] = [];

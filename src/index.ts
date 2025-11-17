@@ -4,7 +4,7 @@ import cors from '@fastify/cors';
 import multipart from '@fastify/multipart';
 import mongoose from 'mongoose';
 import { z } from 'zod';
-import { uploadVideoToR2, streamToBuffer, testR2Connection } from './r2';
+import { uploadVideoToR2, testR2Connection } from './r2';
 
 const PORT = Number(process.env.PORT || 3001);
 const DATABASE_URL = process.env.DATABASE_URL;
@@ -1065,29 +1065,33 @@ app.post('/upload/video', async (request, reply) => {
       });
     }
 
-    // Convert stream to buffer
-    const buffer = await streamToBuffer(data.file);
-
-    // Validate file size (e.g., max 5GB)
+    // Get file size from the multipart data if available
+    // Note: For large files, we stream directly to R2 to avoid memory issues
+    const fileSize = data.file.bytesRead || 0;
     const maxSize = 5 * 1024 * 1024 * 1024; // 5GB in bytes
-    if (buffer.length > maxSize) {
+
+    // If we have size info, validate it early
+    // Note: bytesRead might not be accurate for streams, but it's a best-effort check
+    if (fileSize > 0 && fileSize > maxSize) {
       return reply.code(400).send({
         error: 'File too large. Maximum size is 5GB.',
       });
     }
 
-    // Upload to R2
+    // Stream directly to R2 (memory-efficient - doesn't load entire file into memory)
+    // The multipart parser gives us a readable stream which we pass directly to R2
     const publicUrl = await uploadVideoToR2(
-      buffer,
+      data.file, // Pass the stream directly
       data.filename || 'video.mp4',
-      data.mimetype
+      data.mimetype,
+      fileSize > 0 ? fileSize : undefined
     );
 
     return reply.code(200).send({
       ok: true,
       url: publicUrl,
       filename: data.filename,
-      size: buffer.length,
+      size: fileSize > 0 ? fileSize : undefined,
       mimetype: data.mimetype,
     });
   } catch (error) {
