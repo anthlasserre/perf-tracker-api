@@ -565,8 +565,8 @@ app.get('/players/:userId/progress', async (request, reply) => {
 
     // Calculate percentages
     const totalPasses = cumulativePassPositive + cumulativePassNegative;
-    const passesAccuracy = totalPasses > 0 
-      ? (cumulativePassPositive / totalPasses) * 100 
+    const passesAccuracy = totalPasses > 0
+      ? (cumulativePassPositive / totalPasses) * 100
       : null;
 
     const totalTackles = cumulativeTackleOffensive + cumulativeTackleMissed + cumulativeTackleSuffered;
@@ -579,8 +579,8 @@ app.get('/players/:userId/progress', async (request, reply) => {
       ? ((cumulativeDuelWon + cumulativeDuelNeutral) / totalDuels) * 100
       : null;
 
-    const avgPerformanceRating = matchCount > 0 
-      ? cumulativePerformanceRating / matchCount 
+    const avgPerformanceRating = matchCount > 0
+      ? cumulativePerformanceRating / matchCount
       : 0;
 
     progressData.push({
@@ -1068,11 +1068,11 @@ app.post('/upload/video', async (request, reply) => {
     // Convert stream to buffer
     const buffer = await streamToBuffer(data.file);
 
-    // Validate file size (e.g., max 500MB)
-    const maxSize = 500 * 1024 * 1024; // 500MB in bytes
+    // Validate file size (e.g., max 5GB)
+    const maxSize = 5 * 1024 * 1024 * 1024; // 5GB in bytes
     if (buffer.length > maxSize) {
       return reply.code(400).send({
-        error: 'File too large. Maximum size is 500MB.',
+        error: 'File too large. Maximum size is 5GB.',
       });
     }
 
@@ -1107,7 +1107,7 @@ async function start() {
     // Register multipart plugin for file uploads
     await app.register(multipart, {
       limits: {
-        fileSize: 500 * 1024 * 1024, // 500MB
+        fileSize: 5 * 1024 * 1024 * 1024, // 5GB
       },
     });
 
