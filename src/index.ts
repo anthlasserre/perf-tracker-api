@@ -1,8 +1,10 @@
 import 'dotenv/config';
 import Fastify from 'fastify';
 import cors from '@fastify/cors';
+import multipart from '@fastify/multipart';
 import mongoose from 'mongoose';
 import { z } from 'zod';
+import { uploadVideoToR2, streamToBuffer, testR2Connection } from './r2';
 
 const PORT = Number(process.env.PORT || 3001);
 const DATABASE_URL = process.env.DATABASE_URL;
@@ -172,6 +174,19 @@ const userValidationSchema = z.object({
 });
 
 app.get('/health', async () => ({ ok: true }));
+
+// R2 connection test endpoint (for debugging)
+app.get('/r2/test', async (request, reply) => {
+  try {
+    const result = await testR2Connection();
+    return reply.code(result.success ? 200 : 500).send(result);
+  } catch (error) {
+    return reply.code(500).send({
+      success: false,
+      message: error instanceof Error ? error.message : 'Unknown error',
+    });
+  }
+});
 
 // Game Stats endpoints
 app.post('/gamestats', async (request, reply) => {
@@ -1024,13 +1039,96 @@ app.get('/users/club/:clubId', async (request) => {
   return docs.map((doc: any) => doc.toObject());
 });
 
+// Video upload endpoint
+app.post('/upload/video', async (request, reply) => {
+  try {
+    const data = await request.file();
+
+    if (!data) {
+      return reply.code(400).send({ error: 'No file uploaded' });
+    }
+
+    // Validate file type
+    const allowedMimeTypes = [
+      'video/mp4',
+      'video/mpeg',
+      'video/quicktime',
+      'video/x-msvideo', // .avi
+      'video/webm',
+      'video/3gpp',
+    ];
+
+    if (!data.mimetype || !allowedMimeTypes.includes(data.mimetype)) {
+      return reply.code(400).send({
+        error: 'Invalid file type. Only video files are allowed.',
+        allowedTypes: allowedMimeTypes,
+      });
+    }
+
+    // Convert stream to buffer
+    const buffer = await streamToBuffer(data.file);
+
+    // Validate file size (e.g., max 500MB)
+    const maxSize = 500 * 1024 * 1024; // 500MB in bytes
+    if (buffer.length > maxSize) {
+      return reply.code(400).send({
+        error: 'File too large. Maximum size is 500MB.',
+      });
+    }
+
+    // Upload to R2
+    const publicUrl = await uploadVideoToR2(
+      buffer,
+      data.filename || 'video.mp4',
+      data.mimetype
+    );
+
+    return reply.code(200).send({
+      ok: true,
+      url: publicUrl,
+      filename: data.filename,
+      size: buffer.length,
+      mimetype: data.mimetype,
+    });
+  } catch (error) {
+    console.error('Error uploading video:', error);
+    return reply.code(500).send({
+      error: 'Failed to upload video',
+      message: error instanceof Error ? error.message : 'Unknown error',
+    });
+  }
+});
+
 async function start() {
   try {
     // Initialize database
     await initDb();
 
+    // Register multipart plugin for file uploads
+    await app.register(multipart, {
+      limits: {
+        fileSize: 500 * 1024 * 1024, // 500MB
+      },
+    });
+
     // Register CORS
     await app.register(cors, { origin: true });
+
+    // Test R2 connection on startup (non-blocking)
+    if (process.env.R2_ACCOUNT_ID && process.env.R2_ACCESS_KEY_ID) {
+      testR2Connection()
+        .then((result) => {
+          if (result.success) {
+            console.log('✅ R2 connection test passed');
+          } else {
+            console.warn(`⚠️  R2 connection test failed: ${result.message}`);
+            console.warn('⚠️  Video uploads may not work. Check R2 configuration.');
+          }
+        })
+        .catch((error) => {
+          console.warn('⚠️  R2 connection test error:', error);
+        });
+    }
 
     // Start server
     await app.listen({ host: '0.0.0.0', port: PORT });

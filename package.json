@@ -11,15 +11,19 @@
     "build": "tsc -p tsconfig.json"
   },
   "dependencies": {
-    "@fastify/cors": "^9.0.1",
+    "@aws-sdk/client-s3": "^3.932.0",
+    "@fastify/cors": "^11.1.0",
+    "@fastify/multipart": "^9.3.0",
     "dotenv": "^17.2.3",
-    "fastify": "^4.28.1",
-    "fastify-plugin": "^4.5.1",
+    "fastify": "^5.6.2",
+    "fastify-plugin": "^5.1.0",
     "mongoose": "^8.19.3",
+    "uuid": "^13.0.0",
     "zod": "^4.1.12"
   },
   "devDependencies": {
     "@types/node": "^20.12.12",
+    "@types/uuid": "^11.0.0",
     "ts-node-dev": "^2.0.0",
     "typescript": "^5.4.5"
   },
