@@ -1076,7 +1076,7 @@ app.get('/videos/signed-url', async (request, reply) => {
     const videoUrlOrKey = assetKey || videoUrl;
 
     // Parse expiresIn if provided (default to 1 hour)
-    const expirationSeconds = expiresIn ? parseInt(expiresIn, 10) : 3600;
+    const expirationSeconds = expiresIn ? parseInt(expiresIn, 10) : 60 * 60 * 24; // 1 day
 
     if (isNaN(expirationSeconds) || expirationSeconds <= 0) {
       return reply.code(400).send({
